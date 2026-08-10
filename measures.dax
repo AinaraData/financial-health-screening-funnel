@@ -1,0 +1,99 @@
+-- ============================================================
+-- Financial Health Screening Funnel
+-- Data source: Financial Modeling Prep API (stable endpoints)
+-- Tickers: AAPL, MSFT, NVDA, XOM
+-- (ASML excluded: FMP's free tier restricts non-U.S.-domiciled
+-- companies' fundamentals data)
+-- ============================================================
+
+-- Data ingestion: Power BI's native Web connector pulls JSON
+-- directly from the FMP API into Power Query — no database layer
+-- this time, unlike the SQL-based Investment Portfolio Tracker.
+
+-- Endpoints used (one call per ticker, both statement types):
+-- https://financialmodelingprep.com/stable/income-statement?symbol={TICKER}&apikey={KEY}
+-- https://financialmodelingprep.com/stable/balance-sheet-statement?symbol={TICKER}&apikey={KEY}
+
+-- Combined into two tables via Power Query "Append Queries as New"
+-- (the Power Query equivalent of a SQL UNION ALL):
+--   IncomeStatements_All  (4 tickers appended)
+--   BalanceSheets_All     (4 tickers appended)
+-- Related on [symbol] as many-to-many, since both tables carry
+-- multiple fiscal years per ticker, so a single visual can pull
+-- ratios computed from both statements simultaneously.
+
+
+-- ----------------------------------------------------------------
+-- Ratio measures
+-- Each pulls the latest fiscal year available per ticker via
+-- ALLEXCEPT, since companies report on different fiscal calendars
+-- (Apple's fiscal year ends in September, Microsoft's in June).
+-- ----------------------------------------------------------------
+
+Current Ratio = 
+VAR LatestDate = CALCULATE(MAX(BalanceSheets_All[date]), ALLEXCEPT(BalanceSheets_All, BalanceSheets_All[symbol]))
+VAR CA = CALCULATE(SUM(BalanceSheets_All[totalCurrentAssets]), ALLEXCEPT(BalanceSheets_All, BalanceSheets_All[symbol]), BalanceSheets_All[date] = LatestDate)
+VAR CL = CALCULATE(SUM(BalanceSheets_All[totalCurrentLiabilities]), ALLEXCEPT(BalanceSheets_All, BalanceSheets_All[symbol]), BalanceSheets_All[date] = LatestDate)
+RETURN DIVIDE(CA, CL)
+
+Debt to Equity = 
+VAR LatestDate = CALCULATE(MAX(BalanceSheets_All[date]), ALLEXCEPT(BalanceSheets_All, BalanceSheets_All[symbol]))
+VAR Debt = CALCULATE(SUM(BalanceSheets_All[totalDebt]), ALLEXCEPT(BalanceSheets_All, BalanceSheets_All[symbol]), BalanceSheets_All[date] = LatestDate)
+VAR Equity = CALCULATE(SUM(BalanceSheets_All[totalEquity]), ALLEXCEPT(BalanceSheets_All, BalanceSheets_All[symbol]), BalanceSheets_All[date] = LatestDate)
+RETURN DIVIDE(Debt, Equity)
+
+Operating Margin = 
+VAR LatestDate = CALCULATE(MAX(IncomeStatements_All[date]), ALLEXCEPT(IncomeStatements_All, IncomeStatements_All[symbol]))
+VAR OpInc = CALCULATE(SUM(IncomeStatements_All[operatingIncome]), ALLEXCEPT(IncomeStatements_All, IncomeStatements_All[symbol]), IncomeStatements_All[date] = LatestDate)
+VAR Rev = CALCULATE(SUM(IncomeStatements_All[revenue]), ALLEXCEPT(IncomeStatements_All, IncomeStatements_All[symbol]), IncomeStatements_All[date] = LatestDate)
+RETURN DIVIDE(OpInc, Rev)
+
+Interest Coverage = 
+VAR LatestDate = CALCULATE(MAX(IncomeStatements_All[date]), ALLEXCEPT(IncomeStatements_All, IncomeStatements_All[symbol]))
+VAR Ebit = CALCULATE(SUM(IncomeStatements_All[ebit]), ALLEXCEPT(IncomeStatements_All, IncomeStatements_All[symbol]), IncomeStatements_All[date] = LatestDate)
+VAR IntExp = CALCULATE(SUM(IncomeStatements_All[interestExpense]), ALLEXCEPT(IncomeStatements_All, IncomeStatements_All[symbol]), IncomeStatements_All[date] = LatestDate)
+RETURN DIVIDE(Ebit, IntExp)
+
+
+-- ----------------------------------------------------------------
+-- Funnel measures
+-- Each stage counts how many tickers still satisfy every
+-- threshold up to and including that stage.
+-- Thresholds: Current Ratio >= 1, Debt-to-Equity <= 1,
+-- Operating Margin > 0, Interest Coverage >= 3x (or blank,
+-- treated as no debt-service burden rather than a failure).
+-- ----------------------------------------------------------------
+
+1. All Companies = COUNTROWS(VALUES(BalanceSheets_All[symbol]))
+
+2. Liquid = 
+COUNTROWS(
+    FILTER(
+        VALUES(BalanceSheets_All[symbol]),
+        [Current Ratio] >= 1
+    )
+)
+
+3. Liquid + Solvent = 
+COUNTROWS(
+    FILTER(
+        VALUES(BalanceSheets_All[symbol]),
+        [Current Ratio] >= 1 && [Debt to Equity] <= 1
+    )
+)
+
+4. Liquid + Solvent + Profitable = 
+COUNTROWS(
+    FILTER(
+        VALUES(BalanceSheets_All[symbol]),
+        [Current Ratio] >= 1 && [Debt to Equity] <= 1 && [Operating Margin] > 0
+    )
+)
+
+5. Passes All Criteria = 
+COUNTROWS(
+    FILTER(
+        VALUES(BalanceSheets_All[symbol]),
+        [Current Ratio] >= 1 && [Debt to Equity] <= 1 && [Operating Margin] > 0 && ([Interest Coverage] >= 3 || ISBLANK([Interest Coverage]))
+    )
+)
