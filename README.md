@@ -54,8 +54,3 @@ Unlike the SQL-based Investment Portfolio Tracker, this project ingests data dir
 
 Power BI Desktop · Power Query (Web/JSON connector) · DAX · Financial Modeling Prep API · GitHub
 
-## Self-Grade
-
-- [x] **Business relevance** — answers a real pre-due-diligence screening question, not just a ratio dump
-- [x] **Analytical rigor** — fiscal-year-aware measures and a genuine multi-stage funnel, not a single static table
-- [x] **Professional polish** — consistent theme with the Investment Portfolio Tracker, reference line tied directly to the funnel's own threshold, verified numbers across visuals
